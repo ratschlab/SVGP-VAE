@@ -1,0 +1,11 @@
+debug
+.DS_Store
+Test_videos.pkl
+*.swo
+*.swp
+Test_Videos.pkl
+Test_Batches.pkl
+.vscode
+__pycache__
+.ipynb_checkpoints
+Untitled.ipynb
