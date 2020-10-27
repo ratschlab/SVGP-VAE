@@ -135,8 +135,7 @@ def run_experiment_sprites_SVGPVAE(args, dict_):
                                                        GECO=args.GECO,
                                                        repr_NN=repr_NN,
                                                        segment_ids=segment_ids_placeholder,
-                                                       repeats=repeats_placeholder,
-                                                       MC_estimators=args.MC_estimators)
+                                                       repeats=repeats_placeholder)
 
             # forward pass standard VAE (for training regime from CASALE: VAE-GP-joint)
             recon_loss_VAE, KL_term_VAE, elbo_VAE, recon_images_VAE, qnet_mu_VAE, \
@@ -733,8 +732,6 @@ if __name__ == "__main__":
                                 help='Batch size for pretraining of the representation neural net.')
     parser_sprites.add_argument('--object_kernel_normalize', action='store_true',
                                 help='Normalize object (linear) kernel.')
-    parser_sprites.add_argument('--MC_estimators', action='store_true',
-                                help='Add N/b constant to batch estimators for parameters of q^Titsias.')
     parser_sprites.add_argument('--K_tanh', action='store_true',
                                 help='Normalize a linear GP kernel using a tanh function.')
     parser_sprites.add_argument('--K_SE', action='store_true',

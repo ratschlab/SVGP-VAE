@@ -312,7 +312,7 @@ if __name__=="__main__":
     parser.add_argument('--ram', type=float, default=0.5, help='fraction of GPU ram to use')
     parser.add_argument('--seed', type=int, default=None, help='seed for rng')
     parser.add_argument('--tmax', type=int, default=30, help='length of videos')
-    parser.add_argument('--m', type=int, default=10, help='number of inducing points')
+    parser.add_argument('--m', type=int, default=15, help='number of inducing points')
     parser.add_argument('--GP_joint', action="store_true", help='GP hyperparams joint optimization.')
     parser.add_argument('--ip_joint', action="store_true", help='Inducing points joint optimization.')
     parser.add_argument('--clip_qs', action="store_true", help='Clip variance of inference network.')

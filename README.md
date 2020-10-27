@@ -1,8 +1,8 @@
 # Scalable Gaussian Process VAE
 
-Code for paper Scalable Gaussian Process Variational Autoencoders. 
+Code for paper [Scalable Gaussian Process Variational Autoencoders](https://arxiv.org/abs/2010.13472). 
 
-Repo was initially forked from https://github.com/scrambledpie/GPVAE.
+Initially forked from [this cool repo](https://github.com/scrambledpie/GPVAE).
 
 ## Dependencies
 * Python >= 3.6
@@ -33,10 +33,10 @@ or
 ### Rotated MNIST
 
 ##### CVAE
-`python GPVAEmodel.py --elbo CVAE `
+`python MNIST_experiment.py --elbo CVAE `
 
 ##### [GPVAE_Casale](https://arxiv.org/abs/1810.11738)
-`python GPVAEmodel.py --elbo GPVAE_Casale --GP_joint --ov_joint --clip_qs --opt_regime VAE-100 GP-100 --PCA
+`python MNIST_experiment.py --elbo GPVAE_Casale --GP_joint --ov_joint --clip_qs --opt_regime VAE-100 GP-100 --PCA
 `
 
 ##### SVGPVAE

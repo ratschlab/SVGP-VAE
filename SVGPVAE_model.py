@@ -300,40 +300,43 @@ class mainSVGP:
 
             return L_3_sum_term, KL_term
 
-    def approximate_posterior_params(self, index_points, y=None, noise=None):
+    def approximate_posterior_params(self, index_points_test, index_points_train=None, y=None, noise=None):
         """
         Computes parameters of q_S.
 
-        :param index_points: points at which we want to evaluate posterior mean at
+        :param index_points_test: X_*
+        :param index_points_train: X_Train
         :param y: y vector of latent GP
         :param noise: noise vector of latent GP
 
-        :return: posterior mean at index points (b, 1),
-                 diagonal of posterior covariance matrix at index points (b, 1)
+        :return: posterior mean at index points,
+                 (diagonal of) posterior covariance matrix at index points
         """
 
-        b = tf.cast(tf.shape(index_points)[0], dtype=self.dtype)
+        b = tf.cast(tf.shape(index_points_train)[0], dtype=self.dtype)
 
-        # kernel matrices
         K_mm = self.kernel_matrix(self.inducing_index_points, self.inducing_index_points)  # (m,m)
         K_mm_inv = tf.linalg.inv(_add_diagonal_jitter(K_mm, self.jitter))  # (m,m)
-        K_bb = self.kernel_matrix(index_points, index_points, x_inducing=False, y_inducing=False, diag_only=True)  # (b)
-        K_bm = self.kernel_matrix(index_points, self.inducing_index_points, x_inducing=False)  # (b, m)
-        K_mb = tf.transpose(K_bm, perm=[1, 0])  # (m, b)
+        K_xx = self.kernel_matrix(index_points_test, index_points_test, x_inducing=False,
+                                  y_inducing=False, diag_only=True)  # (x)
+        K_xm = self.kernel_matrix(index_points_test, self.inducing_index_points, x_inducing=False)  # (x, m)
+        K_mx = tf.transpose(K_xm, perm=[1, 0])  # (m, x)
 
-        sigma_l = K_mm + (self.N_train / b) * tf.matmul(K_mb,
-                                                        tf.matmul(
-                                                            tf.linalg.diag(tf.math.reciprocal_no_nan(noise)),
-                                                            K_bm))
+        K_nm = self.kernel_matrix(index_points_train, self.inducing_index_points, x_inducing=False)  # (N, m)
+        K_mn = tf.transpose(K_nm, perm=[1, 0])  # (m, N)
 
+        sigma_l = K_mm + (self.N_train / b) * tf.matmul(K_mn,
+                                                        tf.multiply(K_nm,
+                                                                    tf.math.reciprocal_no_nan(noise)[:, tf.newaxis]))
         sigma_l_inv = tf.linalg.inv(_add_diagonal_jitter(sigma_l, self.jitter))
-        K_bm_Sigma_l_K_mb = tf.matmul(K_bm, tf.matmul(sigma_l_inv, K_mb))
-        B = K_bb + tf.linalg.diag_part(-tf.matmul(K_bm, tf.matmul(K_mm_inv, K_mb)) + K_bm_Sigma_l_K_mb)
+        mean_vector = (self.N_train / b) * tf.linalg.matvec(K_xm, tf.linalg.matvec(sigma_l_inv,
+                                                              tf.linalg.matvec(K_mn, tf.math.reciprocal_no_nan(
+                                                                  noise) * y)))
 
-        mean_vector = (self.N_train / b) * tf.linalg.matvec(K_bm_Sigma_l_K_mb,
-                                                            tf.math.reciprocal_no_nan(noise) * y)
+        K_xm_Sigma_l_K_mx = tf.matmul(K_xm, tf.matmul(sigma_l_inv, K_mx))
+        B = K_xx + tf.linalg.diag_part(-tf.matmul(K_xm, tf.matmul(K_mm_inv, K_mx)) + K_xm_Sigma_l_K_mx)
 
-        mu_hat = (self.N_train / b) * tf.linalg.matvec(tf.matmul(K_mm, tf.matmul(sigma_l_inv, K_mb)),
+        mu_hat = (self.N_train / b) * tf.linalg.matvec(tf.matmul(K_mm, tf.matmul(sigma_l_inv, K_mn)),
                                                        tf.math.reciprocal_no_nan(noise) * y)
         A_hat = tf.matmul(K_mm, tf.matmul(sigma_l_inv, K_mm))
 
@@ -365,68 +368,6 @@ class mainSVGP:
         mean_vector = (self.N_train / b) * tf.linalg.matvec(tf.matmul(K_mm, tf.matmul(sigma_l_inv, K_mb)),
                                                             tf.math.reciprocal_no_nan(noise) * y)
         return mean_vector
-
-    def approximate_posterior_params_precomputed_GP_posterior_params(self, index_points, mean_term, sigma_term,
-                                                                     K_mm_inv=None):
-        """
-        Parameters of GP predictive posterior based on the entire train dataset.
-
-        :param index_points:
-        :param mean_term:
-        :param sigma_term:
-        :param K_mm_inv: precomputed inverse of inducing points kernel matrix.
-                If None, it is computed inside this function.
-        :return:
-        """
-
-        if K_mm_inv is None:
-            K_mm = self.kernel_matrix(self.inducing_index_points, self.inducing_index_points)  # (m,m)
-            K_mm_inv = tf.linalg.inv(_add_diagonal_jitter(K_mm, self.jitter))  # (m,m)
-
-        K_bb = self.kernel_matrix(index_points, index_points, x_inducing=False, y_inducing=False, diag_only=True)  # (b)
-        K_bm = self.kernel_matrix(index_points, self.inducing_index_points, x_inducing=False)  # (b, m)
-        K_mb = tf.transpose(K_bm, perm=[1, 0])  # (m, b)
-
-        mean_vector = tf.linalg.matvec(K_bm, mean_term)
-        B = K_bb + tf.linalg.diag_part(- tf.matmul(K_bm, tf.matmul(K_mm_inv, K_mb)) +
-                                       tf.matmul(K_bm, tf.matmul(sigma_term, K_mb)))
-
-        return mean_vector, B
-
-    def approximate_posterior_predict(self, index_points_test, index_points_train=None, y=None, noise=None):
-        """
-        Use full train data to construct the GP predictive posterior.
-        Then use the posterior to predict for test points.
-
-        :param index_points_test: x
-        :param index_points_train: N (in case Hensman posterior is used, we do not have to pass training points)
-        :param y: y vector of latent GP, note that it is only needed in case of \mathcal{L}_2 (titsias)
-        :param noise: noise vector of latent GP, note that it is only needed in case of \mathcal{L}_2 (titsias)
-
-        :return: posterior mean at index points (b, 1),
-                 posterior covariance matrix at index points (b, b)
-        """
-
-        K_mm = self.kernel_matrix(self.inducing_index_points, self.inducing_index_points)  # (m,m)
-        K_mm_inv = tf.linalg.inv(_add_diagonal_jitter(K_mm, self.jitter))  # (m,m)
-        K_xx = self.kernel_matrix(index_points_test, index_points_test, x_inducing=False,
-                                  y_inducing=False, diag_only=True)  # (x)
-        K_xm = self.kernel_matrix(index_points_test, self.inducing_index_points, x_inducing=False)  # (x, m)
-        K_mx = tf.transpose(K_xm, perm=[1, 0])  # (m, x)
-
-        K_nm = self.kernel_matrix(index_points_train, self.inducing_index_points, x_inducing=False)  # (N, m)
-        K_mn = tf.transpose(K_nm, perm=[1, 0])  # (m, N)
-
-        sigma_l = K_mm + tf.matmul(K_mn, tf.multiply(K_nm, tf.math.reciprocal_no_nan(noise)[:, tf.newaxis]))
-        sigma_l_inv = tf.linalg.inv(_add_diagonal_jitter(sigma_l, self.jitter))
-        mean_vector = tf.linalg.matvec(K_xm, tf.linalg.matvec(sigma_l_inv,
-                                                              tf.linalg.matvec(K_mn, tf.math.reciprocal_no_nan(
-                                                                  noise) * y)))
-
-        K_xm_Sigma_l_K_mx = tf.matmul(K_xm, tf.matmul(sigma_l_inv, K_mx))
-        B = K_xx + tf.linalg.diag_part(-tf.matmul(K_xm, tf.matmul(K_mm_inv, K_mx)) + K_xm_Sigma_l_K_mx)
-
-        return mean_vector, B
 
     def variable_summary(self):
         """
@@ -675,6 +616,33 @@ class spritesSVGP(mainSVGP):
 
         return self.GPLVM_action, self.inducing_index_points
 
+    def approximate_posterior_params_precomputed_GP_posterior_params(self, index_points, mean_term, sigma_term,
+                                                                     K_mm_inv=None):
+        """
+        Parameters of GP predictive posterior based some precomputed params.
+
+        :param index_points:
+        :param mean_term:
+        :param sigma_term:
+        :param K_mm_inv: precomputed inverse of inducing points kernel matrix.
+                If None, it is computed inside this function.
+        :return:
+        """
+
+        if K_mm_inv is None:
+            K_mm = self.kernel_matrix(self.inducing_index_points, self.inducing_index_points)  # (m,m)
+            K_mm_inv = tf.linalg.inv(_add_diagonal_jitter(K_mm, self.jitter))  # (m,m)
+
+        K_bb = self.kernel_matrix(index_points, index_points, x_inducing=False, y_inducing=False, diag_only=True)  # (b)
+        K_bm = self.kernel_matrix(index_points, self.inducing_index_points, x_inducing=False)  # (b, m)
+        K_mb = tf.transpose(K_bm, perm=[1, 0])  # (m, b)
+
+        mean_vector = tf.linalg.matvec(K_bm, mean_term)
+        B = K_bb + tf.linalg.diag_part(- tf.matmul(K_bm, tf.matmul(K_mm_inv, K_mb)) +
+                                       tf.matmul(K_bm, tf.matmul(sigma_term, K_mb)))
+
+        return mean_vector, B
+
 
 def build_SVGPVAE_elbo_graph(vid_batch, beta, svgp_x, svgp_y, clipping_qs=False):
     """
@@ -907,7 +875,8 @@ def forward_pass_SVGPVAE(data_batch, beta, vae, svgp, C_ma, lagrange_mult, alpha
     inside_elbo_recon, inside_elbo_kl = [], []
     p_m, p_v = [], []
     for l in range(qnet_mu.get_shape()[1]):  # iterate over latent dimensions
-        p_m_l, p_v_l, mu_hat_l, A_hat_l = svgp.approximate_posterior_params(aux_data, qnet_mu[:, l], qnet_var[:, l])
+        p_m_l, p_v_l, mu_hat_l, A_hat_l = svgp.approximate_posterior_params(aux_data, aux_data,
+                                                                            qnet_mu[:, l], qnet_var[:, l])
         inside_elbo_recon_l,  inside_elbo_kl_l = svgp.variational_loss(x=aux_data, y=qnet_mu[:, l],
                                                                        noise=qnet_var[:, l], mu_hat=mu_hat_l,
                                                                        A_hat=A_hat_l)
@@ -1087,10 +1056,9 @@ def bacthing_predict_SVGPVAE_rotated_mnist(test_data_batch, vae, svgp,
     # get latent samples for test data from GP posterior
     p_m, p_v = [], []
     for l in range(qnet_mu.get_shape()[1]):  # iterate over latent dimensions
-        p_m_l, p_v_l = svgp.approximate_posterior_predict(index_points_test=aux_data_test_batch,
-                                                          index_points_train=aux_data_train,
-                                                          y=qnet_mu[:, l], noise=qnet_var[:, l])
-        # p_v_l = tf.linalg.diag_part(p_v_l)  # no need for Cholesky, remember email correspondence with Michael
+        p_m_l, p_v_l, _, _ = svgp.approximate_posterior_params(index_points_test=aux_data_test_batch,
+                                                               index_points_train=aux_data_train,
+                                                               y=qnet_mu[:, l], noise=qnet_var[:, l])
         p_m.append(p_m_l)
         p_v.append(p_v_l)
 
