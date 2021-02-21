@@ -46,3 +46,5 @@ To generate other rotated MNIST datasets use `generate_rotated_MNIST` function i
 ## Authors
 - Metod Jazbec (jazbec.metod@gmail.com)
 
+## Misc
+If you want to see yet another cool GP-VAE model, check out [this](https://github.com/metodj/FGP-VAE).
