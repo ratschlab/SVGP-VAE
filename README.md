@@ -19,7 +19,9 @@ Here we report run configurations which were used to produce results presented i
 For all available configurations run
 `python --BALL_experiment.py --help`
 or
-`python --MNIST_experiment.py --help`.
+`python --MNIST_experiment.py --help`
+or 
+`python --SPRITES_experiment.py --help`.
 ### Moving ball
 
 ##### VAE 
@@ -43,6 +45,16 @@ or
 `python MNIST_experiment.py --elbo SVGPVAE_Hensman --ip_joint --GP_joint --ov_joint --clip_qs --GECO --PCA`
 
 To generate other rotated MNIST datasets use `generate_rotated_MNIST` function in `utils.py`.
+
+### SPRITES dataset
+To generate SPRITES dataset:
+- clone the original [SPRITES repo](https://github.com/YingzhenLi/Sprites)
+- set the SPRITES repo path on line 5 in SPRITES_utils.py
+- run `python SPRITES_utils.py`
+
+To run SPRITES experiment: 
+`python SPRITES_experiment.py --elbo SVGPVAE_Hensman --ip_joint --GPLVM_joint --PCA --clip_qs --GECO --object_kernel_normalize --clip_grad`
+
 ## Authors
 - Metod Jazbec (jazbec.metod@gmail.com)
 
