@@ -487,8 +487,8 @@ class mnistSVGP(mainSVGP):
 class spritesSVGP(mainSVGP):
 
     def __init__(self, titsias, fixed_inducing_points, initial_inducing_points,
-                 name, jitter, N_train, L_action, initial_GPLVM_action, L, fixed_GP_params,
-                 fixed_GPLVM_action=False, K_obj_normalize=False, K_tanh=False, K_SE=False):
+                 name, jitter, N_train, L_action, initial_GPLVM_action, L_character,
+                 L, fixed_GP_params=False, fixed_GPLVM=False, K_obj_normalize=False, K_SE=False):
         """
         SVGP class for rotated MNIST data.
 
@@ -500,11 +500,11 @@ class spritesSVGP(mainSVGP):
         :param N_train: number of training datapoints
         :param L_action: dimension of GPLVM action vectors
         :param initial_GPLVM_action: GPLVM action vectors
-        :param fixed_GPLVM_action: if False GPLVM action vectors are jointly
+        :param L_character: imension of GPLVM character vectors
+        :param fixed_GPLVM: if False GPLVM vectors are jointly
             optimized along other SVGPVAE parameters. Else, they are fixed throughout training
         :param K_obj_normalize: whether or not to normalize object linear kernel
         :param L: number of latent channels used in SVGPVAE
-        :param K_tanh: normalize a linear GP kernel using a tanh function
         :param K_SE: use the squared-exponential kernel instead of the linear kernel
         :param fixed_GP_params:
         """
@@ -516,12 +516,11 @@ class spritesSVGP(mainSVGP):
                                           dtype=np.float32, K_obj_normalize=K_obj_normalize, L=L)
 
         self.L_action = L_action
-        self.K_tanh = K_tanh
+        self.L_character = L_character
         self.K_SE = K_SE
 
-        # action vectors (GPLVM)
-        # u (inducing points)
-        if fixed_GPLVM_action:
+        # GPLVM vectors
+        if fixed_GPLVM:
             self.GPLVM_action = tf.constant(initial_GPLVM_action, dtype=self.dtype)
         else:
             self.GPLVM_action = tf.Variable(initial_GPLVM_action, dtype=self.dtype,
@@ -550,7 +549,7 @@ class spritesSVGP(mainSVGP):
 
     def kernel_matrix(self, x, y, x_inducing=True, y_inducing=True, diag_only=False):
         """
-        Computes GP kernel matrix K(x,y). Product kernel between two linear kernels is used here.
+        Computes GP kernel matrix K(x,y).
 
         :param x:
         :param y:
@@ -574,37 +573,29 @@ class spritesSVGP(mainSVGP):
             action_matrix = self.kernel_action.apply(x_action, y_action)
             character_matrix = self.kernel_character.apply(x_character, y_character)
 
-            if not self.K_SE:  # normalize when linear kernels are used
-                if self.K_obj_normalize:
-                    action_norm = tf.math.reduce_euclidean_norm(x_action, axis=1) * \
-                                  tf.math.reduce_euclidean_norm(y_action, axis=1)
-                    action_matrix = action_matrix / action_norm
+            if not self.K_SE and self.K_obj_normalize:  # normalize linear kernels
+                action_norm = tf.math.reduce_euclidean_norm(x_action, axis=1) * \
+                              tf.math.reduce_euclidean_norm(y_action, axis=1)
+                action_matrix = action_matrix / action_norm
 
-                    character_norm = tf.math.reduce_euclidean_norm(x_character, axis=1) * \
-                                     tf.math.reduce_euclidean_norm(y_character, axis=1)
-                    character_matrix = character_matrix / character_norm
-                elif self.K_tanh:
-                    action_matrix = tf.math.tanh(action_matrix)
-                    character_matrix = tf.math.tanh(character_matrix)
+                character_norm = tf.math.reduce_euclidean_norm(x_character, axis=1) * \
+                                 tf.math.reduce_euclidean_norm(y_character, axis=1)
+                character_matrix = character_matrix / character_norm
 
         else:
             action_matrix = self.kernel_action.matrix(x_action, y_action)
             character_matrix = self.kernel_character.matrix(x_character, y_character)
 
-            if not self.K_SE:
-                if self.K_obj_normalize:  # normalize when linear kernels are used
-                    action_norm = 1 / tf.matmul(tf.math.reduce_euclidean_norm(x_action, axis=1, keepdims=True),
-                                             tf.transpose(tf.math.reduce_euclidean_norm(y_action, axis=1, keepdims=True),
-                                                          perm=[1, 0]))
-                    action_matrix = action_matrix * action_norm
-
-                    character_norm = 1 / tf.matmul(tf.math.reduce_euclidean_norm(x_character, axis=1, keepdims=True),
-                                         tf.transpose(tf.math.reduce_euclidean_norm(y_character, axis=1, keepdims=True),
+            if not self.K_SE and self.K_obj_normalize:  # normalize when linear kernels are used
+                action_norm = 1 / tf.matmul(tf.math.reduce_euclidean_norm(x_action, axis=1, keepdims=True),
+                                         tf.transpose(tf.math.reduce_euclidean_norm(y_action, axis=1, keepdims=True),
                                                       perm=[1, 0]))
-                    character_matrix = character_matrix * character_norm
-                elif self.K_tanh:
-                    action_matrix = tf.math.tanh(action_matrix)
-                    character_matrix = tf.math.tanh(character_matrix)
+                action_matrix = action_matrix * action_norm
+
+                character_norm = 1 / tf.matmul(tf.math.reduce_euclidean_norm(x_character, axis=1, keepdims=True),
+                                     tf.transpose(tf.math.reduce_euclidean_norm(y_character, axis=1, keepdims=True),
+                                                  perm=[1, 0]))
+                character_matrix = character_matrix * character_norm
 
         return action_matrix * character_matrix
 
@@ -867,7 +858,7 @@ def forward_pass_SVGPVAE(data_batch, beta, vae, svgp, C_ma, lagrange_mult, alpha
     if clipping_qs:
         qnet_var = tf.clip_by_value(qnet_var, 1e-3, 10)
 
-    if repr_NN:
+    if repr_NN is not None:  # use representation network for character vectors
         aux_data = aux_data_SVGPVAE_sprites(data_batch=data_batch, repr_nn=repr_NN,
                                             segment_ids=segment_ids, repeats=repeats)
 
@@ -970,13 +961,11 @@ def batching_encode_SVGPVAE(data_batch, vae, clipping_qs=False, repr_nn=None,
     if clipping_qs:
         qnet_var = tf.clip_by_value(qnet_var, 1e-3, 10)
 
-    if repr_nn:
-        aux_data_train = aux_data_SVGPVAE_sprites(data_batch=data_batch, repr_nn=repr_nn,
+    if repr_nn is not None:
+        aux_data = aux_data_SVGPVAE_sprites(data_batch=data_batch, repr_nn=repr_nn,
                                                   segment_ids=segment_ids, repeats=repeats)
 
-        return qnet_mu, qnet_var, aux_data_train
-    else:
-        return qnet_mu, qnet_var
+    return qnet_mu, qnet_var, aux_data
 
 
 def batching_encode_SVGPVAE_full(train_images, vae, clipping_qs=False):
@@ -1128,7 +1117,7 @@ def aux_data_SVGPVAE_sprites(data_batch, repr_nn, segment_ids, repeats):
 
 def predict_SVGPVAE_sprites_test_character(data_batch, vae, svgp, repr_NN, mean_terms,
                                            var_terms, N_context, N_actions, batch_size_test,
-                                           segment_ids, repeats, K_mm_inv):
+                                           segment_ids, repeats, K_mm_inv, context_full_actions=True):
     """
     Conditional generation prediction function for test_character SPRITES data.
 
@@ -1144,24 +1133,31 @@ def predict_SVGPVAE_sprites_test_character(data_batch, vae, svgp, repr_NN, mean_
     :param segment_ids:
     :param repeats:
     :param K_mm_inv: precomputed inverse of inducing points kernel matrix
+    :param context_full_actions: use full actions (8 frames) for the context in the test phase
     :return:
     """
     
-    images, aux_data = data_batch
+    images, aux_data_target = data_batch
     _, w, h, c = images.get_shape()
 
-    # split into context and target frames
-    # (here we use the fact that test_char batch size is 576 and hence N_test_character % 576 == 0)
-    context = np.sort(np.array([list(i*N_actions+np.random.choice(range(N_actions), N_context, replace=False)) for i
-                                in range(int(batch_size_test/N_actions))]).reshape(-1))
-    target = np.array([x for x in range(batch_size_test) if x not in list(context)])
+    if repr_NN is not None:
+        # split into context and target frames
+        # (here we use the fact that test_char batch size is 576 and hence N_test_character % 576 == 0)
 
-    images_context, images_target = tf.gather(images, context), tf.gather(images, target)
-    _, aux_data_target = tf.gather(aux_data, context), tf.gather(aux_data, target)
+        if context_full_actions:
+            context = np.sort(np.array([list(range(i * N_actions, i * N_actions + N_context)) for i in
+                                        range(int(batch_size_test / N_actions))]).reshape(-1))
+        else:
+            context = np.sort(np.array([list(i*N_actions+np.random.choice(range(N_actions), N_context, replace=False)) for i
+                                        in range(int(batch_size_test/N_actions))]).reshape(-1))
+        target = np.array([x for x in range(batch_size_test) if x not in list(context)])
 
-    # generate aux_data for target frames
-    aux_data_target = aux_data_SVGPVAE_sprites(data_batch=(images_context, aux_data_target), repr_nn=repr_NN,
-                                               segment_ids=segment_ids, repeats=repeats)
+        images_context, images = tf.gather(images, context), tf.gather(images, target)
+        _, aux_data_target = tf.gather(aux_data_target, context), tf.gather(aux_data_target, target)
+
+        # generate aux_data for target frames
+        aux_data_target = aux_data_SVGPVAE_sprites(data_batch=(images_context, aux_data_target), repr_nn=repr_NN,
+                                                   segment_ids=segment_ids, repeats=repeats)
 
     # get latent samples for test data from GP posterior
     p_m, p_v = [], []
@@ -1188,7 +1184,7 @@ def predict_SVGPVAE_sprites_test_character(data_batch, vae, svgp, repr_NN, mean_
     recon_images_test = recon_images_test_logits
 
     # MSE loss for CGEN
-    recon_loss = tf.reduce_sum((images_target - recon_images_test_logits) ** 2)
+    recon_loss = tf.reduce_sum((images - recon_images_test_logits) ** 2)
 
     # report per pixel loss
     # (note that we do not divide it by the number of target frames - that is done
@@ -1196,19 +1192,4 @@ def predict_SVGPVAE_sprites_test_character(data_batch, vae, svgp, repr_NN, mean_
     K = tf.cast(w, dtype=vae.dtype) * tf.cast(h, dtype=vae.dtype) * tf.cast(c, dtype=vae.dtype)
     recon_loss = recon_loss / K
 
-    return recon_images_test, images_target, recon_loss, tf.gather(aux_data, target), aux_data_target
-
-
-def predict_SVGPVAE_sprites_test_action(data_batch, vae, svgp, qnet_mu, qnet_var, aux_data_train):
-    """
-    Conditional generation prediction function for test_action SPRITES data.
-
-    :param data_batch:
-    :param vae:
-    :param svgp:
-    :param qnet_mu:
-    :param qnet_var:
-    :param aux_data_train:
-    :return:
-    """
-    raise NotImplementedError()
+    return recon_images_test, images, recon_loss

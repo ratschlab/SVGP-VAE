@@ -389,3 +389,43 @@ class sprites_representation_network:
                                                  name="GP_repr_NN_5"),
                 tf.keras.layers.Flatten(name="GP_repr_NN_6")
             ])
+
+
+class SVGP_Hensman_decoder:
+
+    dtype = tf.float64
+
+    def __init__(self, L=16):
+        """
+        Decoder network for SVGP_Hensman for rotated MNIST data.
+        Architecture (almost) same as in Casale (see Figure 4 in Supplementary material).
+
+        :param L:
+        """
+
+        self.L = L
+
+        self.decoder = tf.keras.Sequential(
+            [
+                tf.keras.layers.Dense(128, dtype=self.dtype),
+                tf.keras.layers.Reshape(target_shape=(4, 4, 8)),
+                tf.keras.layers.UpSampling2D(size=(2, 2)),
+                tf.keras.layers.Conv2D(
+                    filters=8, kernel_size=3, strides=(1, 1), activation='elu', padding='same', dtype=self.dtype),
+                tf.keras.layers.UpSampling2D(size=(2, 2)),
+                tf.keras.layers.Conv2D(
+                    filters=8, kernel_size=3, strides=(1, 1), activation='elu', dtype=self.dtype),
+                tf.keras.layers.UpSampling2D(size=(2, 2)),
+                tf.keras.layers.Conv2D(
+                    filters=1, kernel_size=3, strides=(1, 1), activation='elu', padding='same', dtype=self.dtype),
+            ])
+
+    def decode(self, latent_samples):
+        """
+
+        :param latent_samples:
+        :return:
+        """
+
+        recon_images = self.decoder(latent_samples)
+        return recon_images

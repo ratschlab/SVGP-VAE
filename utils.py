@@ -1,3 +1,7 @@
+"""
+Utils functions for the moving ball and the rotated MNIST experiments.
+"""
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow.python.ops import math_ops as tfmath_ops
@@ -5,7 +9,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from datetime import datetime as dt
-import glob
 from matplotlib.patches import Ellipse
 import shutil
 import pandas as pd
@@ -793,7 +796,7 @@ def visualize_kernel_matrices(aux_data_arr, batch_size=32, N=1, K_obj_normalized
     plt.show()
 
 
-def import_rotated_mnist(MNIST_path, ending, batch_size, digits="3", N_t=None):
+def import_rotated_mnist(MNIST_path, ending, batch_size, digits="3", N_t=None, global_index=False):
     """
 
     Support for loading of data and batching via tf.data.Dataset API.
@@ -803,6 +806,7 @@ def import_rotated_mnist(MNIST_path, ending, batch_size, digits="3", N_t=None):
     :param batch_size:
     :param N_t: How many angels in train set for each image in test set
                 (since reGPVAE implementation is based on not_shuffled data).
+    :param global_index: if True, add global index to the auxiliary data (used in SVGP_Hensman)
 
     :return:
     """
@@ -835,6 +839,10 @@ def import_rotated_mnist(MNIST_path, ending, batch_size, digits="3", N_t=None):
             train_data_dict['aux_data'] = np.concatenate((train_data_dict['aux_data'],
                                                           train_not_in_test_data_dict['aux_data'][mask][:n, ]), axis=0)
 
+    if global_index:
+        add_global_index = lambda arr: np.c_[list(range(len(arr))), arr]
+        train_data_dict['aux_data'] = add_global_index(train_data_dict['aux_data'])
+
     train_data_images = tf.data.Dataset.from_tensor_slices(train_data_dict['images'])
     train_data_aux_data = tf.data.Dataset.from_tensor_slices(train_data_dict['aux_data'])
     train_data = tf.data.Dataset.zip((train_data_images, train_data_aux_data)).batch(batch_size)
@@ -843,6 +851,8 @@ def import_rotated_mnist(MNIST_path, ending, batch_size, digits="3", N_t=None):
     eval_batch_size_placeholder = tf.compat.v1.placeholder(dtype=tf.int64, shape=())
     eval_data_dict = pickle.load(open(MNIST_path + 'eval_data' + ending, 'rb'))
     eval_data_images = tf.data.Dataset.from_tensor_slices(eval_data_dict['images'])
+    if global_index:
+        eval_data_dict['aux_data'] = add_global_index(eval_data_dict['aux_data'])
     eval_data_aux_data = tf.data.Dataset.from_tensor_slices(eval_data_dict['aux_data'])
     eval_data = tf.data.Dataset.zip((eval_data_images, eval_data_aux_data)).batch(eval_batch_size_placeholder)
 
@@ -850,6 +860,8 @@ def import_rotated_mnist(MNIST_path, ending, batch_size, digits="3", N_t=None):
     test_batch_size_placeholder = tf.compat.v1.placeholder(dtype=tf.int64, shape=())
     test_data_dict = pickle.load(open(MNIST_path + 'test_data' + ending, 'rb'))
     test_data_images = tf.data.Dataset.from_tensor_slices(test_data_dict['images'])
+    if global_index:
+        test_data_dict['aux_data'] = add_global_index(test_data_dict['aux_data'])
     test_data_aux_data = tf.data.Dataset.from_tensor_slices(test_data_dict['aux_data'])
     test_data = tf.data.Dataset.zip((test_data_images, test_data_aux_data)).batch(test_batch_size_placeholder)
 
@@ -905,205 +917,6 @@ def IndexedSlicesValue_to_numpy(a):
         assert 0 <= index < len(arr), ("IndexedSlicesValue has invalid index %s\n%s" % (index, a))
         arr[index] += values_slice
     return arr
-
-
-def import_sprites(batch_size, sprites_path='SPRITES data/', batch_size_test_char=576):
-    """
-
-    Support for loading of data and batching via tf.data.Dataset API.
-
-    :param batch_size:
-    :param sprites_path:
-    :param batch_size_test_char: batch size for prediction pipeline for test_character dataset. 576 is chosen since
-                                21312 % 576 == 0, so that implemenation of splitting of test batch into
-                                context and target frames is easier.
-
-    :return: train_iterator,
-             test_action_iterator,
-             test_character_iterator
-    """
-
-    assert batch_size_test_char % 72 == 0
-
-    filenames_train = glob.glob(sprites_path + "train/*.tfrecord")
-    filenames_test_action = glob.glob(sprites_path + "test_action/*.tfrecord")
-    filenames_test_char = glob.glob(sprites_path + "test_character/*.tfrecord")
-
-    dataset_train = tf.data.TFRecordDataset(filenames_train)
-    dataset_test_action = tf.data.TFRecordDataset(filenames_test_action)
-    dataset_test_char = tf.data.TFRecordDataset(filenames_test_char)
-
-    # example proto decode
-    def _parse_function(example_proto):
-        keys_to_features = {'frame': tf.FixedLenFeature((64, 64, 3), tf.float32),
-                            'character_ID': tf.FixedLenFeature((), tf.int64, default_value=0),
-                            'action_ID': tf.FixedLenFeature((), tf.int64, default_value=0)}
-        parsed_features = tf.parse_single_example(example_proto, keys_to_features)
-        return parsed_features['frame'], parsed_features['character_ID'], parsed_features['action_ID']
-
-    dataset_train = dataset_train.map(_parse_function)
-    dataset_test_action = dataset_test_action.map(_parse_function)
-    dataset_test_char = dataset_test_char.map(_parse_function)
-
-    dataset_train = dataset_train.batch(batch_size)
-    dataset_test_action = dataset_test_action.batch(batch_size)
-    dataset_test_char = dataset_test_char.batch(batch_size_test_char)
-
-    # if shuffle_train:
-    #     dataset_train = dataset_train.shuffle(buffer_size=batch_size)
-
-    iterator = tf.data.Iterator.from_structure(dataset_train.output_types, dataset_train.output_shapes)
-    training_init_op = iterator.make_initializer(dataset_train)
-    test_action_init_op = iterator.make_initializer(dataset_test_action)
-    test_char_init_op = iterator.make_initializer(dataset_test_char)
-
-    return iterator, training_init_op, test_action_init_op, test_char_init_op
-
-
-def sprites_PCA_init(path_train_dict, m=15, L_action=6, L_character=16, seed=42):
-    """
-    Produces PCA initialization for GPLVM action vectors as well as for inducing points for SPRITES dataset.
-
-    :param path_train_dict:
-    :param m: number of inducing point per action. Total number of inducing points = m*72
-    :param L_action: dimension of GPLVM action vectors
-    :param L_character: dimension of character vectors (needs to coincide with the dimension of
-                                                                the output layer in representation network).
-
-    :return: GPLVM action init (72, L_action),
-             inducing point init (72*m, L_action + L_character)
-
-    """
-
-    # read in entire training data
-    train_dict = pickle.load(open(path_train_dict, 'rb'))
-    train_frames, train_aux_data = train_dict['frames'], train_dict['aux_data']
-    del train_dict
-
-    # GPLVM action vectors: first compute average frame for each action, resulting in (72, 64*64*3) dataframe.
-    # Then do PCA on it and keep only first L_action principal components, yielding (72, L_action) dataframe.
-    action_ids_train = {i: [] for i in range(72)}
-    for i in range(len(train_aux_data)):
-        action_ids_train[train_aux_data[i, 1]].append(i)
-
-    GPLVM_action = []
-    for action, ids in action_ids_train.items():
-        mean_frame = train_frames[ids].mean(axis=0).reshape(-1)
-        GPLVM_action.append(mean_frame)
-
-    pca_GPLVM = PCA(n_components=L_action)
-    GPLVM_action = pca_GPLVM.fit_transform(np.array(GPLVM_action))
-
-    # inducing points: for each GPLVM_action vector, sample m characters vectors from
-    # PCA dataframe on the entire dataset (N_train, L_character)
-    pca_global = PCA(n_components=L_character)
-    train_frames_PCA = pca_global.fit_transform(train_frames.reshape(-1, 64 * 64 * 3))
-
-    inducing_points = []
-    for i in range(len(GPLVM_action)):
-        char_vectors = []
-        for pca_ax in range(L_character):
-            # sample from empirical distribution of a given PCA feature
-            pca_sample = scipy.stats.gaussian_kde(train_frames_PCA[:, pca_ax]).resample(m, seed=seed).reshape(-1)
-            char_vectors.append(pca_sample)
-        char_vectors = np.array(char_vectors).T
-
-        # repeat GPLVM_action vector m times
-        GPLVM_action_vec = GPLVM_action[i, :]
-        GPLVM_action_vec = np.tile(GPLVM_action_vec, (m, 1))
-
-        # hstack GPLVM action vector and character vectors
-        inducing_points.append(np.hstack((GPLVM_action_vec, char_vectors)))
-
-    inducing_points = np.concatenate(inducing_points)
-
-    del train_frames
-    del train_aux_data
-
-    return GPLVM_action, inducing_points
-
-
-def plot_sprites(arr, recon_arr, title, nr_images=8, seed=0):
-    """
-
-    :param arr:
-    :param recon_arr:
-    :param title:
-    :param nr_images:
-    :param seed:
-    :return:
-    """
-    random.seed(seed)
-    assert nr_images % 8 == 0
-
-    indices = random.sample(list(range(len(arr))), nr_images)
-    plt.figure(figsize=(10, 10*int(nr_images/8)))
-    plt.suptitle(title)
-    for i in range(int(nr_images*2)):
-        plt.subplot(int(nr_images / 2), 4, i + 1)
-        plt.xticks([])
-        plt.yticks([])
-        plt.grid(False)
-        if i % 2 == 0:
-            plt.imshow(arr[indices[i // 2]])
-        else:
-            plt.imshow(recon_arr[indices[i // 2]])
-    # plt.tight_layout()
-    plt.draw()
-
-
-def aux_data_sprites_utils(batch_size, N, repeats):
-    """
-    Generates auxiliary arrays that are needed for construction of auxiliary data for SPRITES dataset.
-    Generated arrays are later used in function aux_data_SVGPVAE_sprites.
-
-    :param batch_size:
-    :param N: nr. frames per character
-    :param repeats: how many times is each summed character vector copied
-
-    :return:
-    """
-    N_char = int(batch_size / N)  # nr. of unique characters
-    segment_ids = np.array([[i] * N for i in range(N_char)]).reshape(-1)
-    repeats_arr = [repeats for _ in range(N_char)]
-
-    return segment_ids, repeats_arr
-
-
-def forward_pass_pretraining_repr_NN(frames, labels, repr_NN, classification_layer, test_pipeline=False):
-    """
-
-    :param frames:
-    :param labels:
-    :param repr_NN: representation neural net
-    :param classification_layer: classificiation layer, used only in the pretraining step
-    :param test_pipeline:
-    :return:
-    """
-
-    if not test_pipeline:
-        # shuffle data in the batch. .shuffle did not work in import_sprites function...
-        indices = tf.range(start=0, limit=tf.shape(frames)[0], dtype=tf.int32)
-        shuffled_indices = tf.random.shuffle(indices)
-        frames = tf.gather(frames, shuffled_indices)
-        labels = tf.gather(labels, shuffled_indices)
-
-    embeddings = repr_NN.repr_nn(frames)
-
-    logits = classification_layer(embeddings)
-
-    # labels_ = tf.one_hot(labels, 1000)
-
-    loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=logits))
-
-    if test_pipeline:
-        preds = tf.argmax(logits, 1)
-        _, acc = tf.compat.v1.metrics.accuracy(labels=labels, predictions=preds)
-
-        return loss, acc
-
-    else:
-        return loss
 
 
 def compute_bias_variance_mean_estimators(arr_batch, arr_full):
@@ -1196,7 +1009,7 @@ def latent_samples_SVGPVAE(train_images, train_aux_data, vae, svgp, clipping_qs=
 
 if __name__=="__main__":
 
-    # generate_init_inducing_points("MNIST data/train_data3.p", PCA=False)
+    generate_init_inducing_points("MNIST data/train_data3.p", PCA=False)
 
     # ============= generating rotated MNIST data =============
     # generate_rotated_MNIST("MNIST data/", digits=[3, 6])
@@ -1212,5 +1025,6 @@ if __name__=="__main__":
     # generate_rotated_MNIST("MNIST data/", digits=[3], latent_dim_object_vector=16)
     # generate_rotated_MNIST("MNIST data/", digits=[3], latent_dim_object_vector=32)
     # generate_rotated_MNIST("MNIST data/", digits=[3], latent_dim_object_vector=64)
-    generate_rotated_MNIST("MNIST data/", digits=[3], latent_dim_object_vector=24)
+    # generate_rotated_MNIST("MNIST data/", digits=[3], latent_dim_object_vector=24)
+
 
