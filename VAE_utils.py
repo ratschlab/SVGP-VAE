@@ -391,13 +391,13 @@ class sprites_representation_network:
             ])
 
 
-class SVGP_Hensman_decoder:
+class SVIGP_Hensman_decoder:
 
     dtype = tf.float64
 
     def __init__(self, L=16):
         """
-        Decoder network for SVGP_Hensman for rotated MNIST data.
+        Decoder network for SVIGP_Hensman for rotated MNIST data.
         Architecture (almost) same as in Casale (see Figure 4 in Supplementary material).
 
         :param L:

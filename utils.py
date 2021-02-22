@@ -806,7 +806,7 @@ def import_rotated_mnist(MNIST_path, ending, batch_size, digits="3", N_t=None, g
     :param batch_size:
     :param N_t: How many angels in train set for each image in test set
                 (since reGPVAE implementation is based on not_shuffled data).
-    :param global_index: if True, add global index to the auxiliary data (used in SVGP_Hensman)
+    :param global_index: if True, add global index to the auxiliary data (used in SVIGP_Hensman)
 
     :return:
     """

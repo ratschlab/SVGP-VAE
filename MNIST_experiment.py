@@ -5,6 +5,9 @@ import os
 import json
 
 import numpy as np
+# import matplotlib.pyplot as plt
+import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -12,12 +15,13 @@ import tensorflow_probability as tfp
 from utils import plot_mnist, generate_init_inducing_points, import_rotated_mnist, \
                   print_trainable_vars, parse_opt_regime, compute_bias_variance_mean_estimators, \
                   make_checkpoint_folder, pandas_res_saver, latent_samples_SVGPVAE, latent_samples_VAE_full_train
-from VAE_utils import mnistVAE, mnistCVAE
+from VAE_utils import mnistVAE, mnistCVAE, SVIGP_Hensman_decoder
 from SVGPVAE_model import forward_pass_SVGPVAE, mnistSVGP, forward_pass_standard_VAE_rotated_mnist, \
                           batching_encode_SVGPVAE, batching_encode_SVGPVAE_full, \
                           bacthing_predict_SVGPVAE_rotated_mnist, predict_CVAE
 
 from GPVAE_Casale_model import encode, casaleGP, forward_pass_Casale, predict_test_set_Casale, sort_train_data
+from SVIGP_Hensman_model import SVIGP_Hensman, forward_pass_deep_SVIGP_Hensman, predict_deep_SVIGP_Hensman
 
 tfd = tfp.distributions
 tfk = tfp.math.psd_kernels
@@ -152,7 +156,7 @@ def run_experiment_rotated_mnist_SVGPVAE(args, args_dict):
             train_encodings_means_placeholder = tf.compat.v1.placeholder(dtype=tf.float64, shape=(None, args.L))
             train_encodings_vars_placeholder = tf.compat.v1.placeholder(dtype=tf.float64, shape=(None, args.L))
 
-            qnet_mu_train, qnet_var_train = batching_encode_SVGPVAE(input_batch, vae=VAE,
+            qnet_mu_train, qnet_var_train, _ = batching_encode_SVGPVAE(input_batch, vae=VAE,
                                                                     clipping_qs=args.clip_qs)
             recon_images_test, \
             recon_loss_test = bacthing_predict_SVGPVAE_rotated_mnist(input_batch,
@@ -537,6 +541,248 @@ def run_experiment_rotated_mnist_SVGPVAE(args, args_dict):
                     pickle.dump(latent_samples_full_, pickle_latents)
 
 
+def run_experiment_rotated_mnist_SVIGP_Hensman(args, args_dict):
+    """
+    Function with tensorflow graph and session for SVIGP_Hensman experiments on rotated MNIST data.
+
+    :param args:
+    :return:
+    """
+
+    # define some constants
+    n = len(args.dataset)
+    N_train = n * 4050
+    N_eval = n * 640
+    N_test = n * 270
+
+    if args.save:
+        # Make a folder to save everything
+        extra = args.elbo + "_" + str(args.beta)
+        chkpnt_dir = make_checkpoint_folder(args.base_dir, args.expid, extra)
+        pic_folder = chkpnt_dir + "pics/"
+        res_file = chkpnt_dir + "res/ELBO_pandas"
+        res_file_GP = chkpnt_dir + "res/ELBO_GP_pandas"
+        print("\nCheckpoint Directory:\n" + str(chkpnt_dir) + "\n")
+
+        json.dump(args_dict, open(chkpnt_dir + "/args.json", "wt"))
+
+    # Init plots
+    if args.show_pics:
+        plt.ion()
+
+    graph = tf.Graph()
+    with graph.as_default():
+
+        # ====================== 1) import data ======================
+        # shuffled data or not
+        ending = args.dataset + ".p"
+
+        iterator, training_init_op, eval_init_op, test_init_op, train_data_dict, eval_data_dict, test_data_dict, \
+            eval_batch_size_placeholder, test_batch_size_placeholder = import_rotated_mnist(args.mnist_data_path,
+                                                                                            ending, args.batch_size,
+                                                                                            global_index=True)
+
+        # get the batch
+        input_batch = iterator.get_next()
+
+        # ====================== 2) build ELBO graph ======================
+
+        # init VAE object
+        VAE = SVIGP_Hensman_decoder(L=args.L)
+
+        beta = tf.compat.v1.placeholder(dtype=tf.float64, shape=())
+
+        # init inducing points
+        inducing_points_init = generate_init_inducing_points(args.mnist_data_path + 'train_data' + ending,
+                                                             n=args.nr_inducing_points,
+                                                             remove_test_angle=None,
+                                                             PCA=args.PCA, M=args.M)
+        ip_joint = not args.ip_joint
+        GP_joint = not args.GP_joint
+
+        # init GP-LVM vectors
+        if args.ov_joint:
+            if args.PCA:  # use PCA embeddings for initialization of object vectors
+                object_vectors_init = pickle.load(open(args.mnist_data_path +
+                                                       'pca_ov_init{}.p'.format(args.dataset), 'rb'))
+            else:  # initialize object vectors randomly
+                object_vectors_init = np.random.normal(0, 1.5,
+                                                       len(args.dataset)*400*args.M).reshape(len(args.dataset)*400,
+                                                                                             args.M)
+        else:
+            object_vectors_init = None
+
+        # init SVGP object
+        SVGP_ = SVIGP_Hensman(fixed_inducing_points=ip_joint, initial_inducing_points=inducing_points_init,
+                              fixed_gp_params=GP_joint, object_vectors_init=object_vectors_init, name='main',
+                              jitter=args.jitter, N_train=N_train, L=args.L,
+                              K_obj_normalize=args.object_kernel_normalize, dtype=np.float64)
+
+        # forward pass
+        elbo, recon_loss, KL_term, inside_elbo, recon_images, \
+        inside_elbo_recon, inside_elbo_kl, latent_samples = forward_pass_deep_SVIGP_Hensman(input_batch, vae=VAE, svgp=SVGP_)
+
+        # test loss and predictions
+        recon_images_test, recon_loss_test = predict_deep_SVIGP_Hensman(input_batch, vae=VAE, svgp=SVGP_)
+
+        # GP diagnostics
+        GP_l, GP_amp, GP_ov, GP_ip = SVGP_.variable_summary()
+
+        # ====================== 3) optimizer ops ======================
+        global_step = tf.Variable(0, name='global_step', trainable=False)
+        train_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+        lr = tf.compat.v1.placeholder(dtype=tf.float64, shape=())
+        optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=lr)
+
+        # minimizing negative elbo
+        gradients = tf.gradients(-elbo, train_vars)
+        optim_step = optimizer.apply_gradients(grads_and_vars=zip(gradients, train_vars), global_step=global_step)
+
+        # ====================== 4) Pandas saver ======================
+        if args.save:
+            res_vars = [global_step,
+                        elbo,
+                        recon_loss,
+                        KL_term]
+
+            res_names = ["step",
+                         "ELBO",
+                         "recon loss",
+                         "KL term"]
+
+            res_vars += [inside_elbo,
+                         inside_elbo_recon,
+                         inside_elbo_kl,
+                         latent_samples]
+
+            res_names += ["inside elbo",
+                          "inside elbo recon",
+                          "inside elbo KL",
+                          "latent_samples"]
+
+            res_vars_GP = [GP_l,
+                           GP_amp,
+                           GP_ov,
+                           GP_ip]
+
+            res_names_GP = ['length scale', 'amplitude', 'object vectors', 'inducing points']
+
+            res_saver_GP = pandas_res_saver(res_file_GP, res_names_GP)
+
+            res_saver = pandas_res_saver(res_file, res_names)
+
+        # ====================== 5) print and init trainable params ======================
+        print_trainable_vars(train_vars)
+
+        init_op = tf.global_variables_initializer()
+
+        # ====================== 6) saver and GPU ======================
+
+        if args.save_model_weights:
+            saver = tf.compat.v1.train.Saver(max_to_keep=3)
+
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.ram)
+
+        # ====================== 7) tf.session ======================
+
+        nr_epochs = args.nr_epochs
+
+        with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+
+            sess.run(init_op)
+
+            # training loop
+
+            start_time = time.time()
+            cgen_test_set_MSE = []
+            for epoch in range(nr_epochs):
+
+                # 7.1) train for one epoch
+                sess.run(training_init_op)
+
+                elbos, losses = [], []
+                start_time_epoch = time.time()
+                while True:
+                    try:
+                        _, g_s_, elbo_, recon_loss_ = sess.run([optim_step, global_step, elbo, recon_loss],
+                                                               {beta: args.beta, lr: args.lr})
+                        elbos.append(elbo_)
+                        losses.append(recon_loss_)
+                    except tf.errors.OutOfRangeError:
+                        if (epoch + 1) % 10 == 0:
+                            print('Epoch {}, mean ELBO per batch: {}'.format(epoch, np.mean(elbos)))
+                            MSE = np.sum(losses) / N_train
+                            print('MSE loss on train set for epoch {} : {}'.format(epoch, MSE))
+
+                            end_time_epoch = time.time()
+                            print("Time elapsed for epoch {}: {}".format(epoch, end_time_epoch - start_time_epoch))
+                        break
+
+                # 7.2) save metrics to Pandas df for model diagnostics
+                if args.save and (epoch + 1) % 10 == 0:
+                    if args.test_set_metrics:
+                        sess.run(test_init_op, {test_batch_size_placeholder: args.batch_size})
+                    else:
+                        sess.run(eval_init_op, {eval_batch_size_placeholder: args.batch_size})
+
+                    new_res = sess.run(res_vars, {beta: args.beta})
+                    res_saver(new_res, 1)
+
+                    # save GP params
+                    new_res_GP = sess.run(res_vars_GP, {beta: args.beta})
+                    res_saver_GP(new_res_GP, 1)
+
+                # 7.3) calculate loss on test set and visualize reconstructed images
+                if (epoch + 1) % 10 == 0:
+
+                    # test set: conditional generation
+                    # predict test data (in batches)
+                    sess.run(test_init_op, {test_batch_size_placeholder: args.batch_size})
+                    recon_loss_cgen, recon_images_cgen = [], []
+                    while True:
+                        try:
+                            loss_, pics_ = sess.run([recon_loss_test, recon_images_test])
+                            recon_loss_cgen.append(loss_)
+                            recon_images_cgen.append(pics_)
+                        except tf.errors.OutOfRangeError:
+                            break
+                    recon_loss_cgen = np.sum(recon_loss_cgen) / N_test
+                    recon_images_cgen = np.concatenate(recon_images_cgen, axis=0)
+
+                    # test set: plot generations
+                    cgen_test_set_MSE.append((epoch, recon_loss_cgen))
+                    print("Conditional generation MSE loss on test set for epoch {}: {}".format(epoch,
+                                                                                                recon_loss_cgen))
+                    plot_mnist(test_data_dict['images'],
+                               recon_images_cgen,
+                               title="Epoch: {}. CGEN MSE test set:{}".format(epoch + 1, round(recon_loss_cgen, 4)))
+                    if args.show_pics:
+                        plt.show()
+                        plt.pause(0.01)
+                    if args.save:
+                        plt.savefig(pic_folder + str(g_s_) + "_cgen.png")
+                        with open(pic_folder + "test_metrics.txt", "a") as f:
+                            f.write("{},{},{}\n".format(epoch + 1, round(MSE, 4), round(recon_loss_cgen, 4)))
+
+                    # save model weights
+                    if args.save and args.save_model_weights:
+                        saver.save(sess, chkpnt_dir + "model", global_step=g_s_)
+
+            # log running time
+            end_time = time.time()
+            print("Running time for {} epochs: {}".format(nr_epochs, round(end_time - start_time, 2)))
+
+            # report best test set cgen MSE achieved throughout training
+            best_cgen_MSE = sorted(cgen_test_set_MSE, key=lambda x: x[1])[0]
+            print("Best cgen MSE on test set throughout training at epoch {}: {}".format(best_cgen_MSE[0],
+                                                                                         best_cgen_MSE[1]))
+
+            # save images from conditional generation
+            if args.save:
+                with open(chkpnt_dir + '/cgen_images.p', 'wb') as test_pickle:
+                    pickle.dump(recon_images_cgen, test_pickle)
+
+
 def run_experiment_rotated_mnist_Casale(args):
     """
     Reimplementation of Casale's GPVAE model.
@@ -875,9 +1121,9 @@ if __name__=="__main__":
     parser_mnist.add_argument('--base_dir', type=str, default=default_base_dir,
                               help='folder within a new dir is made for each run')
     parser_mnist.add_argument('--elbo', type=str, choices=['VAE', 'CVAE', 'SVGPVAE_Hensman', 'SVGPVAE_Titsias',
-                                                           'GPVAE_Casale', 'GPVAE_Casale_batch'],
+                                                           'GPVAE_Casale', 'GPVAE_Casale_batch', 'SVIGP_Hensman'],
                               default='VAE')
-    parser_mnist.add_argument('--mnist_data_path', type=str, default='MNIST data/',
+    parser_mnist.add_argument('--mnist_data_path', type=str, default='MNIST_data/',
                               help='Path where rotated MNIST data is stored.')
     parser_mnist.add_argument('--batch_size', type=int, default=256)
     parser_mnist.add_argument('--nr_epochs', type=int, default=1000)
@@ -911,10 +1157,17 @@ if __name__=="__main__":
                               help="Compute bias of estimator for mean vector in hat{q}^Titsias for every epoch.")
     parser_mnist.add_argument('--M', type=int, default=8, help="Dimension of GPLVM vectors.")
 
+
+
+
     args_mnist = parser_mnist.parse_args()
 
     if args_mnist.elbo == "GPVAE_Casale":
         run_experiment_rotated_mnist_Casale(args_mnist)
+
+    elif args_mnist.elbo == "SVIGP_Hensman":
+        dict_ = vars(args_mnist)
+        run_experiment_rotated_mnist_SVIGP_Hensman(args_mnist, dict_)
 
     else:  # VAE, CVAE, SVGPVAE_Hensman, SVGPVAE_Titsias
         dict_ = vars(args_mnist)  # [update, 23.6.] to get around weirdest bug ever
