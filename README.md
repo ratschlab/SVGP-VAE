@@ -31,6 +31,7 @@ or
 `python BALL_experiment.py --elbo GPVAE_Pearce`
 
 ##### SVGPVAE
+`python BALL_experiment.py --elbo SVGPVAE_Hensman --clip_qs`
 
 ### Rotated MNIST
 
@@ -38,8 +39,10 @@ or
 `python MNIST_experiment.py --elbo CVAE `
 
 ##### [GPVAE_Casale](https://arxiv.org/abs/1810.11738)
-`python MNIST_experiment.py --elbo GPVAE_Casale --GP_joint --ov_joint --clip_qs --opt_regime VAE-100 GP-100 --PCA
-`
+`python MNIST_experiment.py --elbo GPVAE_Casale --GP_joint --ov_joint --clip_qs --opt_regime VAE-100 GP-100 --PCA`
+
+#### [SVIGP](https://arxiv.org/abs/1309.6835)
+`python MNIST_experiment.py --elbo SVIGP_Hensman --ip_joint --GP_joint --ov_joint --clip_qs --PCA --nr_epochs 2000`
 
 ##### SVGPVAE
 `python MNIST_experiment.py --elbo SVGPVAE_Hensman --ip_joint --GP_joint --ov_joint --clip_qs --GECO --PCA`
@@ -52,7 +55,8 @@ To generate SPRITES dataset:
 - set the SPRITES repo path on line 5 in SPRITES_utils.py
 - run `python SPRITES_utils.py`
 
-To run SPRITES experiment: 
+To run SPRITES experiment:
+
 `python SPRITES_experiment.py --elbo SVGPVAE_Hensman --ip_joint --GPLVM_joint --PCA --clip_qs --GECO --object_kernel_normalize --clip_grad`
 
 ## Authors
