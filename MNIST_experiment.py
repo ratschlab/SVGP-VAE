@@ -1123,7 +1123,7 @@ if __name__=="__main__":
     parser_mnist.add_argument('--elbo', type=str, choices=['VAE', 'CVAE', 'SVGPVAE_Hensman', 'SVGPVAE_Titsias',
                                                            'GPVAE_Casale', 'GPVAE_Casale_batch', 'SVIGP_Hensman'],
                               default='VAE')
-    parser_mnist.add_argument('--mnist_data_path', type=str, default='MNIST_data/',
+    parser_mnist.add_argument('--mnist_data_path', type=str, default='MNIST data/',
                               help='Path where rotated MNIST data is stored.')
     parser_mnist.add_argument('--batch_size', type=int, default=256)
     parser_mnist.add_argument('--nr_epochs', type=int, default=1000)

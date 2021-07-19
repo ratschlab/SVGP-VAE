@@ -994,7 +994,8 @@ def latent_samples_SVGPVAE(train_images, train_aux_data, vae, svgp, clipping_qs=
 
     p_m, p_v = [], []
     for l in range(qnet_mu.get_shape()[1]):  # iterate over latent dimensions
-        p_m_l, p_v_l, _, _ = svgp.approximate_posterior_params(train_aux_data, qnet_mu[:, l], qnet_var[:, l])
+        p_m_l, p_v_l, _, _ = svgp.approximate_posterior_params(train_aux_data, train_aux_data,
+                                                               qnet_mu[:, l], qnet_var[:, l])
         p_m.append(p_m_l)
         p_v.append(p_v_l)
 
